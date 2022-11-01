@@ -21,7 +21,16 @@ num-traits = "0.2.14"
 
 [dev-dependencies]
 criterion = "0.3"
+serde = { version = "1.0" }
+serde_json = "1.0"
 
 [[bench]]
 name = "benchmarks"
 harness = false
+
+[[bin]]
+name = "volkertest"
+path = "src/elementary.rs"
+
+[profile.release]
+debug = 1
