@@ -3,7 +3,7 @@ use criterion::measurement::WallTime;
 use criterion::BenchmarkGroup;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use graphalgs::adj_matrix::unweighted;
-use graphalgs::elementary::johnson_elementary_circuits;
+use graphalgs::elementary::{elementary_circuits, johnson_elementary_circuits};
 use graphalgs::generate::{random_digraph, random_ungraph};
 use graphalgs::shortest_path::{apd, floyd_warshall, seidel, shortest_distances};
 use petgraph::{Directed, Graph};
@@ -30,7 +30,7 @@ fn bench_helper(group: &mut BenchmarkGroup<WallTime>, name: &str, nodes: usize, 
         b.iter(|| {
             let graph: Graph<(), (), Directed, usize> =
                 Graph::from_edges(random_digraph(nodes, nedges).unwrap());
-            let output = johnson_elementary_circuits(&graph);
+            let output = elementary_circuits(&graph);
             black_box(output)
         })
     });
@@ -39,8 +39,9 @@ fn bench_helper(group: &mut BenchmarkGroup<WallTime>, name: &str, nodes: usize, 
 fn bench_johnson_elementary(c: &mut Criterion) {
     let mut group = c.benchmark_group("JohnsonElementary");
     group.sample_size(10);
-    bench_helper(&mut group, "ManyNodes", 10000, 5000);
-    let n = 14;
+    //bench_helper(&mut group, "ManyNodes", 10000, 5000);
+    //let n = 14;
+    let n = 10;
     bench_helper(&mut group, "FewEdges", n, n * n / 2);
     group.finish();
 }
