@@ -3,7 +3,8 @@ use criterion::measurement::WallTime;
 use criterion::BenchmarkGroup;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use graphalgs::adj_matrix::unweighted;
-use graphalgs::elementary::johnson_elementary_circuits;
+use graphalgs::elementary::my_johnson_elementary_circuits;
+use graphalgs::elementary::paper_johnson_elementary_circuits;
 use graphalgs::generate::{random_digraph, random_ungraph};
 use graphalgs::shortest_path::{apd, floyd_warshall, seidel, shortest_distances};
 use petgraph::{Directed, Graph};
@@ -26,11 +27,19 @@ fn bench_seidel(c: &mut Criterion) {
 }
 
 fn bench_helper(group: &mut BenchmarkGroup<WallTime>, name: &str, nodes: usize, nedges: usize) {
-    group.bench_function(name, |b| {
+    group.bench_function(name.to_owned() + "_mine", |b| {
         b.iter(|| {
             let graph: Graph<(), (), Directed, usize> =
                 Graph::from_edges(random_digraph(nodes, nedges).unwrap());
-            let output = johnson_elementary_circuits(&graph);
+            let output = my_johnson_elementary_circuits(&graph);
+            black_box(output)
+        })
+    });
+    group.bench_function(name.to_owned() + "_paper", |b| {
+        b.iter(|| {
+            let graph: Graph<(), (), Directed, usize> =
+                Graph::from_edges(random_digraph(nodes, nedges).unwrap());
+            let output = paper_johnson_elementary_circuits(&graph);
             black_box(output)
         })
     });
@@ -39,9 +48,11 @@ fn bench_helper(group: &mut BenchmarkGroup<WallTime>, name: &str, nodes: usize, 
 fn bench_johnson_elementary(c: &mut Criterion) {
     let mut group = c.benchmark_group("JohnsonElementary");
     group.sample_size(10);
-    bench_helper(&mut group, "ManyNodes", 10000, 5000);
-    let n = 14;
-    bench_helper(&mut group, "FewEdges", n, n * n / 2);
+    // bench_helper(&mut group, "ManyNodes", 10000, 5000);
+    // let n = 13;
+    // bench_helper(&mut group, "FewNodes", n, n * n / 2);
+    // bench_helper(&mut group, "Compare", 1000, 2000);
+    bench_helper(&mut group, "Compare", 5000, 5000);
     group.finish();
 }
 

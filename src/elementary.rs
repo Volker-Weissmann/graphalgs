@@ -50,7 +50,7 @@ fn unblock(n: usize, b: &mut Vec<Vec<bool>>, blocked: &mut [bool], u: usize) {
     }
 }
 
-fn circuit<N, E, Ix>(
+fn paper_circuit<N, E, Ix>(
     graph: &Graph<N, E, Directed, Ix>,
     n: usize,
     output: &mut Vec<Vec<usize>>,
@@ -74,7 +74,7 @@ where
         if w == s {
             output.push(stack.clone());
             f = true;
-        } else if !blocked[w] && circuit(graph, n, output, stack, s, b, blocked, w) {
+        } else if !blocked[w] && paper_circuit(graph, n, output, stack, s, b, blocked, w) {
             f = true;
         }
     }
@@ -89,7 +89,42 @@ where
             b[w][v] = true;
         }
     }
-    assert!(stack.pop() == Some(v));
+    let popped = stack.pop();
+    debug_assert!(popped == Some(v));
+    f
+}
+
+fn my_circuit<N, E, Ix>(
+    graph: &Graph<N, E, Directed, Ix>,
+    n: usize,
+    output: &mut Vec<Vec<usize>>,
+    stack: &mut Vec<usize>,
+    s: usize,
+    b: &mut Vec<Vec<bool>>,
+    blocked: &mut [bool],
+    v: usize,
+) -> bool
+where
+    Ix: IndexType,
+{
+    let mut f = false;
+    stack.push(v);
+    blocked[v] = true;
+    for e in graph.edges(NodeIndex::<Ix>::new(v)) {
+        if e.target().index() < s {
+            continue;
+        }
+        let w = e.target().index();
+        if w == s {
+            output.push(stack.clone());
+            f = true;
+        } else if !blocked[w] && my_circuit(graph, n, output, stack, s, b, blocked, w) {
+            f = true;
+        }
+    }
+    blocked[v] = false;
+    let popped = stack.pop();
+    debug_assert!(popped == Some(v));
     f
 }
 
@@ -139,7 +174,9 @@ where
 // where
 //     Ty: EdgeType,
 //     Ix: IndexType,
-pub fn johnson_elementary_circuits<N, E, Ix>(graph: &Graph<N, E, Directed, Ix>) -> Vec<Vec<usize>>
+pub fn paper_johnson_elementary_circuits<N, E, Ix>(
+    graph: &Graph<N, E, Directed, Ix>,
+) -> Vec<Vec<usize>>
 where
     Ix: IndexType,
 {
@@ -159,13 +196,62 @@ where
                 // The paper says s := least vertex in V_K, i.e. we should
                 // assign s = *least.iter().min().unwrap(),  but unless I'm
                 // mistaken, this is always already true
-                assert_eq!(s, *least.iter().min().unwrap());
+                debug_assert_eq!(s, *least.iter().min().unwrap());
                 for i in least {
                     blocked[i] = false;
                     b[i][0..n].fill(false);
                 }
                 // todo: we don't need n as an argument, we can use graph.node_count()
-                circuit(
+                paper_circuit(
+                    graph,
+                    n,
+                    &mut output,
+                    &mut stack,
+                    s,
+                    &mut b,
+                    &mut blocked,
+                    s,
+                );
+                assert!(stack.is_empty());
+                s += 1;
+            }
+            None => {
+                s = n;
+            }
+        };
+    }
+    output
+}
+
+pub fn my_johnson_elementary_circuits<N, E, Ix>(
+    graph: &Graph<N, E, Directed, Ix>,
+) -> Vec<Vec<usize>>
+where
+    Ix: IndexType,
+{
+    // let a = HashMap::<G::NodeId, Vec<G::NodeId>>::new();
+    // let b = HashMap::<G::NodeId, HashMap<G::NodeId, bool>>::new();
+    // let blocked = HashMap::<G::NodeId, bool>::new();
+    //let s: G::NodeId = 0;
+    let n = graph.node_count();
+    let mut blocked = vec![false; n];
+    let mut b = vec![vec![false; n]; n];
+    let mut s = 0;
+    let mut output = Vec::new();
+    while s < n {
+        match scc(graph, s) {
+            Some(least) => {
+                let mut stack = Vec::<usize>::new();
+                // The paper says s := least vertex in V_K, i.e. we should
+                // assign s = *least.iter().min().unwrap(),  but unless I'm
+                // mistaken, this is always already true
+                debug_assert_eq!(s, *least.iter().min().unwrap());
+                for i in least {
+                    blocked[i] = false;
+                    b[i][0..n].fill(false);
+                }
+                // todo: we don't need n as an argument, we can use graph.node_count()
+                my_circuit(
                     graph,
                     n,
                     &mut output,
@@ -203,7 +289,7 @@ mod tests {
             // let n = 13;
             // let graph: Graph<(), ()> =
             //     Graph::from_edges(volker_random_digraph(n, n * n / 2, seed).unwrap());
-            let output = johnson_elementary_circuits(&graph);
+            let output = my_johnson_elementary_circuits(&graph);
             // dbg!(output.len());
             // dbg!(output.iter().map(|x| x.len()).sum::<usize>());
             assert_eq!(output, all_outputs[seed as usize]);
@@ -285,7 +371,7 @@ mod tests {
         ];
         for (input, expected_output) in input_output_pairs {
             let graph = Graph::<(), i32>::from_edges(input);
-            let actual_output = johnson_elementary_circuits(&graph);
+            let actual_output = my_johnson_elementary_circuits(&graph);
             assert_eq!(actual_output, expected_output);
         }
     }
@@ -295,7 +381,7 @@ mod tests {
         let nedges = 14 * 14 / 2;
         let graph: Graph<(), ()> =
             Graph::from_edges(volker_random_digraph(nodes, nedges, 0).unwrap());
-        let output = johnson_elementary_circuits(&graph);
+        let output = my_johnson_elementary_circuits(&graph);
         std::hint::black_box(output);
     }
 }
@@ -334,9 +420,13 @@ fn volker_random_digraph(
 
 #[allow(dead_code)]
 fn main() {
-    let nodes = 14;
-    let nedges = 15 * 14 / 2;
+    // let nodes = 14;
+    // let nedges = 15 * 14 / 2;
+    // let nodes = 1000;
+    // let nedges = 2000;
+    let nodes = 10;
+    let nedges = 20;
     let graph: Graph<(), ()> = Graph::from_edges(volker_random_digraph(nodes, nedges, 0).unwrap());
-    let output = johnson_elementary_circuits(&graph);
+    let output = paper_johnson_elementary_circuits(&graph);
     std::hint::black_box(output);
 }
