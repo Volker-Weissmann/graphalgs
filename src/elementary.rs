@@ -16,6 +16,7 @@ use petgraph::algo::tarjan_scc;
 use petgraph::stable_graph::IndexType;
 use petgraph::stable_graph::NodeIndex;
 use petgraph::visit::EdgeRef;
+use petgraph::visit::GetAdjacencyMatrix;
 use petgraph::visit::{IntoEdges, NodeCount, NodeIndexable};
 use petgraph::Directed;
 use petgraph::Graph;
@@ -23,7 +24,73 @@ use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::hash::Hash;
+
+pub fn elementary_circuits<N, E, Ix>(graph: &Graph<N, E, Directed, Ix>) -> Vec<Vec<usize>>
+where
+    Ix: IndexType,
+{
+    let n = graph.node_count();
+    let mut possible_paths = vec![vec![HashSet::new(); n]; n];
+
+    for e in graph.edge_references() {
+        let source = e.source().index();
+        let target = e.target().index();
+        let mut used = vec![false; n];
+        used[source] = true;
+        //used[target] = true;
+        if source == target {
+            continue;
+        }
+        possible_paths[source][target].insert(used);
+    }
+    loop {
+        let mut new_paths = vec![vec![Vec::new(); n]; n];
+        let mut stale: bool = true;
+        for source in 0..n {
+            for mid in 0..n {
+                if source == mid {
+                    continue;
+                }
+                for target in 0..n {
+                    if target == mid || target == source {
+                        continue;
+                    }
+                    for p1 in possible_paths[source][mid].iter() {
+                        for p2 in possible_paths[mid][target].iter() {
+                            if p1.iter().zip(p2.iter()).any(|(&a, &b)| a && b) {
+                                continue;
+                            }
+                            let combined = p1
+                                .iter()
+                                .zip(p2.iter())
+                                .map(|(&a, &b)| a || b)
+                                .collect::<Vec<_>>();
+                            if !possible_paths[source][target].contains(&combined) {
+                                new_paths[source][target].push(combined);
+                                stale = false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if stale {
+            break;
+        }
+        for source in 0..n {
+            for target in 0..n {
+                while let Some(path) = new_paths[source][target].pop() {
+                    possible_paths[source][target].insert(path);
+                }
+            }
+        }
+    }
+    std::hint::black_box(possible_paths);
+
+    vec![vec![]]
+}
 
 // fn unblock<NI: Copy + Eq + Hash>(
 //     b: &HashMap<NI, HashMap<NI, bool>>,
@@ -38,85 +105,109 @@ use std::hash::Hash;
 //     }
 // }
 
-fn unblock(n: usize, b: &mut Vec<Vec<bool>>, blocked: &mut [bool], u: usize) {
-    blocked[u] = false;
-    for w in 0..n {
-        if b[u][w] {
-            b[u][w] = false;
-            if blocked[w] {
-                unblock(n, b, blocked, w);
-            }
-        }
+// enum Task {
+//     Search(usize),
+//     Unblock(usize),
+// }
+
+// fn circuit<N, E, Ix>(
+//     graph: &Graph<N, E, Directed, Ix>,
+//     n: usize,
+//     perfgraph: &Vec<Vec<usize>>,
+//     is_precessor_of_s: &[bool],
+//     output: &mut Vec<Vec<usize>>,
+//     s: usize,
+// ) where
+//     Ix: IndexType,
+// {
+//     let mut stack = Vec::<usize>::new();
+//     let mut blocked = vec![false; n];
+//     let mut tasks = vec![Task::Search(s)];
+//     while let Some(task) = tasks.pop() {
+//         match task {
+//             Task::Search(v) => {
+//                 stack.push(v);
+//                 blocked[v] = true;
+//                 if is_precessor_of_s[v] {
+//                     output.push(stack.clone());
+//                 }
+//                 tasks.push(Task::Unblock(v));
+//                 for &w in &perfgraph[v] {
+//                     debug_assert!(w > s);
+//                     if !blocked[w] {
+//                         tasks.push(Task::Search(w));
+//                     }
+//                 }
+//             }
+//             Task::Unblock(v) => {
+//                 blocked[v] = false;
+//                 let popped = stack.pop();
+//                 debug_assert!(popped == Some(v));
+//             }
+//         }
+//     }
+//     debug_assert!(stack.is_empty());
+// }
+
+fn construct_vec_from_tree(tree: &[(usize, usize)], mut index: usize) -> Vec<usize> {
+    let mut ret = Vec::new();
+    while index != 0 {
+        ret.push(tree[index].1);
+        index = tree[index].0
     }
+    ret.reverse();
+    ret
 }
 
 fn circuit<N, E, Ix>(
     graph: &Graph<N, E, Directed, Ix>,
     n: usize,
+    perfgraph: &Vec<Vec<usize>>,
+    is_precessor_of_s: &[bool],
     output: &mut Vec<Vec<usize>>,
-    stack: &mut Vec<usize>,
     s: usize,
-    b: &mut Vec<Vec<bool>>,
-    blocked: &mut [bool],
-    v: usize,
-) -> bool
-where
+) where
     Ix: IndexType,
 {
-    let mut f = false;
-    stack.push(v);
-    blocked[v] = true;
-    for e in graph.edges(NodeIndex::<Ix>::new(v)) {
-        if e.target().index() < s {
-            continue;
+    let mut tasks = vec![(s, vec![false; n], 0)];
+    let mut tree = vec![(0, s)];
+    while let Some((v, blocked, index)) = tasks.pop() {
+        let mut new_blocked = blocked.clone();
+        new_blocked[v] = true;
+        let new_index = tree.len();
+        tree.push((index, v));
+        if is_precessor_of_s[v] {
+            output.push(construct_vec_from_tree(&tree, new_index));
         }
-        let w = e.target().index();
-        if w == s {
-            output.push(stack.clone());
-            f = true;
-        } else if !blocked[w] && circuit(graph, n, output, stack, s, b, blocked, w) {
-            f = true;
-        }
-    }
-    if f {
-        unblock(n, b, blocked, v)
-    } else {
-        for e in graph.edges(NodeIndex::<Ix>::new(v)) {
-            if e.target().index() < s {
-                continue;
+        for &w in &perfgraph[v] {
+            debug_assert!(w > s);
+            if !new_blocked[w] {
+                tasks.push((w, new_blocked.clone(), new_index));
             }
-            let w = e.target().index();
-            b[w][v] = true;
         }
-    }
-    assert!(stack.pop() == Some(v));
-    f
-}
 
-// -> Option<&Vec<NodeIndex>>
-fn scc<N, E, Ix>(graph: &Graph<N, E, Directed, Ix>, s: usize) -> Option<Vec<usize>>
-where
-    Ix: IndexType,
-{
-    let subgraph = graph.filter_map(
-        |ni, _| {
-            if ni.index() >= s {
-                Some(ni.index())
-            } else {
-                None
-            }
-        },
-        |_, edge| Some(edge),
-    );
-    let new_indices = tarjan_scc(&subgraph)
-        .into_iter()
-        .min_by_key(|x| x.iter().min().copied());
-    let old_indices = new_indices.map(|v| {
-        v.into_iter()
-            .map(|ni| *subgraph.node_weight(ni).unwrap())
-            .collect::<Vec<_>>()
-    });
-    old_indices
+        // match task {
+        //     Task::Search(v) => {
+        //         stack.push(v);
+        //         blocked[v] = true;
+        //         if is_precessor_of_s[v] {
+        //             output.push(stack.clone());
+        //         }
+        //         tasks.push(Task::Unblock(v));
+        //         for &w in &perfgraph[v] {
+        //             debug_assert!(w > s);
+        //             if !blocked[w] {
+        //                 tasks.push(Task::Search(w));
+        //             }
+        //         }
+        //     }
+        //     Task::Unblock(v) => {
+        //         blocked[v] = false;
+        //         let popped = stack.pop();
+        //         debug_assert!(popped == Some(v));
+        //     }
+        // }
+    }
 }
 
 // Two elementary circuits are distinct if one is not a cyclic permutation of the other.
@@ -128,6 +219,10 @@ where
 // todo: assert or debug_assert
 
 // todo: usize or NodeIndex?
+
+// todo: what if there are multiple edges connecting a and b?
+
+// todo: does the performance change if the node weights or edge weights are not ()
 
 // todo: check if we get a nice error message if we pass an undirected graph
 
@@ -148,40 +243,31 @@ where
     // let blocked = HashMap::<G::NodeId, bool>::new();
     //let s: G::NodeId = 0;
     let n = graph.node_count();
-    let mut blocked = vec![false; n];
-    let mut b = vec![vec![false; n]; n];
-    let mut s = 0;
+
+    let mut perfgraph = vec![Vec::new(); n];
+    for e in graph.edge_references() {
+        perfgraph[e.source().index()].push(e.target().index());
+    }
+
     let mut output = Vec::new();
-    while s < n {
-        match scc(graph, s) {
-            Some(least) => {
-                let mut stack = Vec::<usize>::new();
-                // The paper says s := least vertex in V_K, i.e. we should
-                // assign s = *least.iter().min().unwrap(),  but unless I'm
-                // mistaken, this is always already true
-                assert_eq!(s, *least.iter().min().unwrap());
-                for i in least {
-                    blocked[i] = false;
-                    b[i][0..n].fill(false);
-                }
-                // todo: we don't need n as an argument, we can use graph.node_count()
-                circuit(
-                    graph,
-                    n,
-                    &mut output,
-                    &mut stack,
-                    s,
-                    &mut b,
-                    &mut blocked,
-                    s,
-                );
-                assert!(stack.is_empty());
-                s += 1;
+    for s in 0..n {
+        for vec in perfgraph.iter_mut() {
+            if let Some(pos) = vec.iter().position(|x| *x <= s) {
+                vec.remove(pos);
             }
-            None => {
-                s = n;
-            }
-        };
+        }
+        let is_precessor_of_s = (0..n)
+            .map(|x| {
+                graph
+                    .edges_connecting(NodeIndex::<Ix>::new(x), NodeIndex::<Ix>::new(s))
+                    .next()
+                    .is_some()
+            })
+            .collect::<Vec<_>>();
+
+        // todo: we don't need n as an argument, we can use graph.node_count()
+        circuit(graph, n, &perfgraph, &is_precessor_of_s, &mut output, s);
+        //debug_assert!(stack.is_empty());
     }
     output
 }
@@ -203,13 +289,16 @@ mod tests {
             // let n = 13;
             // let graph: Graph<(), ()> =
             //     Graph::from_edges(volker_random_digraph(n, n * n / 2, seed).unwrap());
-            let output = johnson_elementary_circuits(&graph);
+            let mut output = johnson_elementary_circuits(&graph);
+            if false {
+                all_outputs.push(output.clone());
+            }
             // dbg!(output.len());
             // dbg!(output.iter().map(|x| x.len()).sum::<usize>());
-            assert_eq!(output, all_outputs[seed as usize]);
-            if false {
-                all_outputs.push(output);
-            }
+            let mut expected = all_outputs[seed as usize].clone();
+            expected.sort();
+            output.sort();
+            assert_eq!(output, expected);
         }
         if false {
             serde_json::to_writer_pretty(
@@ -285,7 +374,10 @@ mod tests {
         ];
         for (input, expected_output) in input_output_pairs {
             let graph = Graph::<(), i32>::from_edges(input);
-            let actual_output = johnson_elementary_circuits(&graph);
+            let mut actual_output = johnson_elementary_circuits(&graph);
+            let mut expected_output = expected_output.clone();
+            expected_output.sort();
+            actual_output.sort();
             assert_eq!(actual_output, expected_output);
         }
     }
@@ -334,9 +426,19 @@ fn volker_random_digraph(
 
 #[allow(dead_code)]
 fn main() {
+    // let graph = Graph::<(), i32>::from_edges(vec![(0, 1), (0, 2), (1, 1), (2, 1)]);
+    // let mut actual_output = johnson_elementary_circuits(&graph);
+    // dbg!(actual_output);
+    // return;
+
     let nodes = 14;
     let nedges = 15 * 14 / 2;
+
+    let nodes = 12;
+    let nedges = nodes * nodes / 2;
+
     let graph: Graph<(), ()> = Graph::from_edges(volker_random_digraph(nodes, nedges, 0).unwrap());
-    let output = johnson_elementary_circuits(&graph);
+    dbg!(&graph);
+    let output = elementary_circuits(&graph);
     std::hint::black_box(output);
 }
